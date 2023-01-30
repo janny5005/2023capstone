@@ -5,3 +5,15 @@ Data/CLAWS/covidhate/user_followers.tar.gz
 Data/CLAWS/covidhate/user_following.tar.gz
 Data/CLAWS/covidhate/asonam_release_all_tweets.csv
 Data/CLAWS/covidhate/annotated_tweets_w_text.csv
+Data/CLAWS/covidhate/asonam21/user_followers.tar.gz
+Data/CLAWS/covidhate/asonam21/bert-8-3-5.tar.gz
+Data/CLAWS/covidhate/asonam21/user_following.tar.gz
+Data/CLAWS/covidhate/asonam21/._bert-8-3-5.tar.gz
+Data/CLAWS/covidhate/asonam21/._user_followers.tar.gz
+Data/CLAWS/covidhate/asonam21/._user_following.tar.gz
+claws_work/bert-8-3-5/pytorch_model.bin
+Data/CLAWS/covidhate/asonam21/._annotated_tweets_w_text.csv
+Data/CLAWS/covidhate/asonam21/annotated_tweets_w_text.csv
+Data/CLAWS/covidhate/asonam21/asonam_release_all_tweets.csv
+Data/CLAWS/covidhate/asonam21/._asonam_release_all_tweets.csv
+Data/INST/institutional_tweets_3year_dataset.csv
