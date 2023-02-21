@@ -17,3 +17,11 @@ Data/CLAWS/covidhate/asonam21/annotated_tweets_w_text.csv
 Data/CLAWS/covidhate/asonam21/asonam_release_all_tweets.csv
 Data/CLAWS/covidhate/asonam21/._asonam_release_all_tweets.csv
 Data/INST/institutional_tweets_3year_dataset.csv
+script/bert-8-3-5/config.json
+claws_work/data/tweet.csv
+claws_work/output/classified_tweet.csv
+Data/CLAWS/covidhate/tweet.csv
+Data/CLAWS/covidhate/tweet_all.csv
+script/data/all_labeled_text.csv
+script/bert-8-3-5/pytorch_model.bin
+script/data/part_labeled_tweet.csv
