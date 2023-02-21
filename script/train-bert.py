@@ -1,9 +1,10 @@
 import torch
-from torch.utils.data import TensorDataset
-from torch.utils.data import DataLoader, SubsetRandomSampler
+from torch.utils.data import TensorDataset, Subset
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from torch import nn
 from torch.nn import functional as F
 from transformers import BertForSequenceClassification, AdamW
+from transformers import get_linear_schedule_with_warmup
 from transformers import BertTokenizer
 from pytorch_pretrained_bert import BertModel
 import pandas as pd
@@ -16,6 +17,7 @@ from sklearn import metrics
 USING_GPU = False
 DEVICE = None
 
+# Pretrained models dictionary
 pretrained_models = {'bert': "bert-base-uncased"}
 
 def format_time(seconds):
@@ -53,48 +55,116 @@ def prepare_dataset(sentences, labels, tokenizer, max_length=100):
 '''
 How to combine pytorch dataloader and k-fold
 '''
-def train(fold, model, device, train_loader, optimizer, epoch):
+def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, epoch, extras):
+    print('Training...')
+
+    # Measure how long the training epoch takes.
+    t0 = time.time()
+
+    # Reset the total loss for this epoch.
+    total_train_loss = 0
     model.train()
-    for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = F.nll_loss(output, target)
-        loss.backward()
-        optimizer.step()
-        if batch_idx % 5 == 0:
-            print('Train Fold/Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                fold,epoch, batch_idx * len(data), len(train_loader.dataset),
-                100. * batch_idx / len(train_loader), loss.item()))
+    # For each batch of training data...
+    for step, batch in enumerate(train_loader):
+        model.zero_grad()
+
+        if step % 40 == 0 and not step == 0:
+            elapsed = format_time(time.time() - t0)
+            print('  Batch {:>5,}  of  {:>5,}.    Elapsed: {:}.'.format(step, len(train_loader), elapsed))
+
+        b_input_ids = batch[0].to(DEVICE)
+        b_input_mask = batch[1].to(DEVICE)
+        b_labels = batch[2].to(DEVICE)
+
+        if extras:
+            b_extras = batch[3].to(DEVICE)
+            b_proba = model(tokens=b_input_ids,
+                            masks=b_input_mask,
+                            extras=b_extras)
+
+            loss = loss_func(b_proba, b_labels)
+            total_train_loss += loss.item()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+
+        else:
+            loss, logits, hidden_states = model(b_input_ids,
+                                                token_type_ids=None,
+                                                attention_mask=b_input_mask,
+                                                labels=b_labels)
+
+            total_train_loss += loss.item()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+            scheduler.step()
+
+            del loss, logits, hidden_states
+
+    avg_train_loss = total_train_loss / len(train_dataloader)
+
+    training_time = format_time(time.time() - t0)
+    print("")
+    print("  Average training loss: {0:.2f}".format(avg_train_loss))
+    print("  Training epoch took: {:}".format(training_time))
 
 def test(fold,model, device, test_loader):
+    print("Running Validation...")
+
+    t0 = time.time()
+
+    # Put the model in evaluation mode--the dropout layers behave differently
+    # during evaluation.
     model.eval()
-    test_loss = 0
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
-            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
 
-    test_loss /= len(test_loader.dataset)
+    # Tracking variables
+    total_f1_score = 0
+    total_eval_accuracy = 0
+    total_eval_loss = 0
+    nb_eval_steps = 0
 
-    print('\nTest set for fold {}: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        fold,test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+    # Evaluate data for one epoch
+    for batch in test_loader:
+        b_input_ids = batch[0].to(device)
+        b_input_mask = batch[1].to(device)
+        b_labels = batch[2].to(device)
+
+        with torch.no_grad():
+            (loss, logits) = model(b_input_ids,
+                                   token_type_ids=None,
+                                   attention_mask=b_input_mask,
+                                   labels=b_labels)
+
+        # Accumulate the validation loss.
+        total_eval_loss += loss.item()
+
+        # Move logits and labels to CPU
+        logits = logits.detach().cpu().numpy()
+        label_ids = b_labels.to('cpu').numpy()
+
+        # Calculate the accuracy for this batch of test sentences, and
+        # accumulate it over all batches.
+        total_eval_accuracy += flat_accuracy(logits, label_ids)
+        total_f1_score += f1_score(np.argmax(logits, axis=1), label_ids)
+
+    # Report the final accuracy and f1_score for this validation run.
+    avg_val_accuracy = total_eval_accuracy / len(validation_dataloader)
+    print("  Accuracy: {0:.2f}".format(avg_val_accuracy))
+
+    avg_f1_score = total_f1_score / len(validation_dataloader)
+    print("  F1_score: {0:.2f}".format(avg_f1_score))
 
 # batch size: 16, 32
 # learning rate: 5e-5, 3e-5, 2e-5
 # epochs: 2,3,4
-def train_bert_model(model, train_dataset, tokenizer, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, extras=False, save_fn=None):
+def train_bert_model(model, train_dataset, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, extras=False, save_fn=None):
 
     if USING_GPU:
         print("Using GPU", DEVICE)
         model.cuda(DEVICE)
 
-    total_t0 = time.time()
     optimizer = AdamW(model.parameters(),
                       lr=learning_rate,
                       eps=epsilon
@@ -103,25 +173,32 @@ def train_bert_model(model, train_dataset, tokenizer, batch_size, epochs=2, lear
     # prepare cross validation
     n = 5
     kfold = KFold(n_splits=n, shuffle=True)
-
+# for each fold
     for fold, (train_idx, test_idx) in enumerate(kfold.split(train_dataset)):
         print('------------fold no---------{}----------------------'.format(fold))
         print(train_idx)
         print(test_idx)
-        train_subsampler = SubsetRandomSampler(train_idx)
-        test_subsampler = SubsetRandomSampler(test_idx)
+        train_tensor = Subset(train_dataset, train_idx)
+        test_tensor = Subset(train_dataset, test_idx)
+        #train_subsampler = SubsetRandomSampler(train_idx)
+        #test_subsampler = SubsetRandomSampler(test_idx)
 
         trainloader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            sampler=train_subsampler)
+            sampler=RandomSampler(train_tensor))
         testloader = DataLoader(
             train_dataset,
             batch_size=batch_size,
-            sampler=test_subsampler)
-
-        for epoch in range(1, epochs + 1):
-            train(fold, model, DEVICE, trainloader, optimizer, epochs)
+            sampler=SequentialSampler(test_tensor))
+        total_steps = len(trainloader) * epochs
+        scheduler = get_linear_schedule_with_warmup(optimizer,
+                                                    num_warmup_steps=0,  # Default value in run_glue.py
+                                                    num_training_steps=total_steps)
+        loss_func = torch.nn.CrossEntropyLoss()
+        for epoch_i in range(0, epochs):
+            print('======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
+            train(fold, model, DEVICE, trainloader, optimizer, scheduler, loss_func, epochs, extras)
             test(fold, model, DEVICE, testloader)
     return
 
@@ -181,7 +258,7 @@ def main():
     
     df = pd.read_csv(args.input)
     df = df[df['Text'].notna()]
-    #X = df.Text.values # x
+    X = df.Text.values # x
     #Y = df['label'] # y_true
     # RuntimeError: Error(s) in loading state_dict for BertForSequenceClassification:
     # size mismatch for classifier.weight: copying a param with shape torch.Size([3, 768]) from checkpoint, the shape in current model is torch.Size([2, 768]).
@@ -194,10 +271,10 @@ def main():
     used_bert_model = pretrained_models[args.trainedBertModel]
     model = BertForSequenceClassification.from_pretrained(used_bert_model, num_labels = 3)
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    #input_ids, attention_masks, labels = prepare_dataset(X, np.zeros(len(X)), tokenizer, max_length=400)
-    #dataset = TensorDataset(input_ids, attention_masks, labels)
+    input_ids, attention_masks, labels = prepare_dataset(X, np.zeros(len(X)), tokenizer, max_length=400)
+    dataset = TensorDataset(input_ids, attention_masks, labels)
     ## train_bert_model(model, train_dataset, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, extras=False, save_fn=None):
-    train_bert_model(model, df[["Text", "label"]], tokenizer, batch_size=args.batchsize, extras=False)
+    train_bert_model(model, dataset, batch_size=args.batchsize, extras=False)
 
     #y_pred = np.zeros(len(X))
     #if not args.usegraph:
