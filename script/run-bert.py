@@ -1,7 +1,6 @@
 import torch
 from torch.utils.data import TensorDataset, random_split
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
-from torch.utils.data import TensorDataset, random_split
 from torch import nn
 from torch.nn import functional as F
 from transformers import BertForSequenceClassification, AdamW, BertConfig
