@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import TensorDataset, random_split
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, SubsetRandomSampler
 from torch.utils.data import TensorDataset, random_split
 from torch import nn
 from torch.nn import functional as F
@@ -53,6 +53,38 @@ def prepare_dataset(sentences, labels, tokenizer, max_length=100):
     labels = torch.tensor(labels)
     return input_ids, attention_masks, labels
 
+def train(fold, model, device, train_loader, optimizer, epoch):
+    model.train()
+    for batch_idx, (data, target) in enumerate(train_loader):
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        loss = F.nll_loss(output, target)
+        loss.backward()
+        optimizer.step()
+        if batch_idx % 5 == 0:
+            print('Train Fold/Epoch: {}/{} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                fold,epoch, batch_idx * len(data), len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), loss.item()))
+
+def test(fold,model, device, test_loader):
+    model.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            output = model(data)
+            test_loss += F.nll_loss(output, target, reduction='sum').item()  # sum up batch loss
+            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            correct += pred.eq(target.view_as(pred)).sum().item()
+
+    test_loss /= len(test_loader.dataset)
+
+    print('\nTest set for fold {}: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
+        fold,test_loss, correct, len(test_loader.dataset),
+        100. * correct / len(test_loader.dataset)))
+
 # batch size: 16, 32
 # learning rate: 5e-5, 3e-5, 2e-5
 # epochs: 2,3,4
@@ -63,98 +95,36 @@ def train_bert_model(model, train_dataset, tokenizer, batch_size, epochs=2, lear
         model.cuda(DEVICE)
 
     total_t0 = time.time()
+    optimizer = AdamW(model.parameters(),
+                      lr=learning_rate,
+                      eps=epsilon
+                      )
 
     # prepare cross validation
     n = 5
-    kf = KFold(n_splits=n, shuffle=True)
+    kfold = KFold(n_splits=n, shuffle=True)
 
-    results = []
+    for fold, (train_idx, test_idx) in enumerate(kfold.split(train_dataset)):
+        print('------------fold no---------{}----------------------'.format(fold))
+        print(train_idx)
+        print(test_idx)
+        train_subsampler = SubsetRandomSampler(train_idx)
+        test_subsampler = SubsetRandomSampler(test_idx)
 
-    training_stats = []
-    loss_func = torch.nn.CrossEntropyLoss()
+        trainloader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=train_subsampler)
+        testloader = DataLoader(
+            train_dataset,
+            batch_size=batch_size,
+            sampler=test_subsampler)
 
-    for train_index, val_index in kf.split(train_dataset):
-        # splitting Dataframe (dataset not included)
-        train_df = train_dataset.iloc[train_index]
-        val_df = train_dataset.iloc[val_index]
-        # train the model
-        model.train_model(train_df['Text'])
-        # validate the model
-        result, model_outputs, wrong_predictions = model.eval_model(val_df, acc=accuracy_score)
-        print(result['acc'])
-        # append model score
-        results.append(result['acc'])
-
-    print("results", results)
-    print(f"Mean-Precision: {sum(results) / len(results)}")
+        for epoch in range(1, epochs + 1):
+            train(fold, model, DEVICE, trainloader, optimizer, epochs)
+            test(fold, model, DEVICE, testloader)
     return
 
-'''
-
-    for epoch_i in range(0, epochs):
-        print("")
-        print('======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
-        print('Training...')
-
-        t0 = time.time()
-        total_train_loss = 0
-        model.train()
-        for step, batch in enumerate(train_dataloader):
-            model.zero_grad()
-            
-            if step % 40 == 0 and not step == 0:
-                elapsed = format_time(time.time() - t0)
-                print('  Batch {:>5,}  of  {:>5,}.    Elapsed: {:}.'.format(step, len(train_dataloader), elapsed))
-                
-            b_input_ids = batch[0].to(DEVICE)
-            b_input_mask = batch[1].to(DEVICE)
-            b_labels = batch[2].to(DEVICE)
-            
-            if extras:
-                b_extras = batch[3].to(DEVICE)
-                b_proba = model(tokens=b_input_ids,
-                              masks=b_input_mask, 
-                              extras=b_extras)
-
-                loss = loss_func(b_proba, b_labels)
-                total_train_loss += loss.item()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                scheduler.step()
-            
-            else:
-                loss, logits, hidden_states = model(b_input_ids,
-                                      token_type_ids=None,
-                                      attention_mask=b_input_mask,
-                                      labels=b_labels)
-
-                total_train_loss += loss.item()
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                scheduler.step()
-                
-                del loss, logits, hidden_states
-
-        avg_train_loss = total_train_loss / len(train_dataloader)
-        
-        training_time = format_time(time.time() - t0)
-        print("")
-        print("  Average training loss: {0:.2f}".format(avg_train_loss))
-        print("  Training epoch took: {:}".format(training_time))
-
-    print("")
-    print("Training complete!")
-    print("Total training took {:} (h:mm:ss)".format(format_time(time.time()-total_t0)))
-    model.eval()
-    
-    if save_fn:
-        model.save_pretrained(save_fn)
-        # model = model_class.from_pretrained('./directory/to/save/')
-    
-    return model
-'''
 def run_bert_model(model, test_dataset, batch_size, extras=False):    
     print('Predicting labels for {:,} test sentences...'.format(len(test_dataset)))
     
