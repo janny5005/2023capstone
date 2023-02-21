@@ -59,7 +59,7 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
     print('Training...')
 
     # Measure how long the training epoch takes.
-    t0 = time.time()
+    #t0 = time.time()
 
     # Reset the total loss for this epoch.
     total_train_loss = 0
@@ -110,51 +110,37 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
     print("  Average training loss: {0:.2f}".format(avg_train_loss))
     print("  Training epoch took: {:}".format(training_time))
 
-def test(fold,model, device, test_loader):
+def test(fold, model, device, test_loader, extra):
     print("Running Validation...")
 
-    t0 = time.time()
-
-    # Put the model in evaluation mode--the dropout layers behave differently
-    # during evaluation.
     model.eval()
+    predictions, true_labels = [], []
+    for batch in tqdm(test_loader, total=len(test_dataset)):
 
-    # Tracking variables
-    total_f1_score = 0
-    total_eval_accuracy = 0
-    total_eval_loss = 0
-    nb_eval_steps = 0
+        if extras:
+            with torch.no_grad():
+                b_proba = model(tokens=batch[0].to(DEVICE),
+                                masks=batch[1].to(DEVICE),
+                                extras=batch[3].to(DEVICE))
 
-    # Evaluate data for one epoch
-    for batch in test_loader:
-        b_input_ids = batch[0].to(device)
-        b_input_mask = batch[1].to(device)
-        b_labels = batch[2].to(device)
+                proba = b_proba.detach().cpu().numpy()
+                label_ids = batch[2].numpy()
 
-        with torch.no_grad():
-            (loss, logits) = model(b_input_ids,
-                                   token_type_ids=None,
-                                   attention_mask=b_input_mask,
-                                   labels=b_labels)
+                predictions.append(proba)
+                true_labels.append(label_ids)
 
-        # Accumulate the validation loss.
-        total_eval_loss += loss.item()
+        else:
+            b_input_ids, b_input_mask, b_labels = batch
+            with torch.no_grad():
+                outputs = model(batch[0].to(DEVICE), token_type_ids=None,
+                                attention_mask=batch[1].to(DEVICE))
+                b_proba = outputs[0]
 
-        # Move logits and labels to CPU
-        logits = logits.detach().cpu().numpy()
-        label_ids = b_labels.to('cpu').numpy()
+                proba = b_proba.detach().cpu().numpy()
+                label_ids = batch[2].numpy()
 
-        # Calculate the accuracy for this batch of test sentences, and
-        # accumulate it over all batches.
-        total_eval_accuracy += flat_accuracy(logits, label_ids)
-        total_f1_score += f1_score(np.argmax(logits, axis=1), label_ids)
-
-    # Report the final accuracy and f1_score for this validation run.
-    avg_val_accuracy = total_eval_accuracy / len(validation_dataloader)
-    print("  Accuracy: {0:.2f}".format(avg_val_accuracy))
-
-    avg_f1_score = total_f1_score / len(validation_dataloader)
-    print("  F1_score: {0:.2f}".format(avg_f1_score))
+                predictions.append(proba)
+                true_labels.append(label_ids)
 
 # batch size: 16, 32
 # learning rate: 5e-5, 3e-5, 2e-5
@@ -199,7 +185,7 @@ def train_bert_model(model, train_dataset, batch_size, epochs=2, learning_rate=2
         for epoch_i in range(0, epochs):
             print('======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
             train(fold, model, DEVICE, trainloader, optimizer, scheduler, loss_func, epochs, extras)
-            test(fold, model, DEVICE, testloader)
+            test(fold, model, DEVICE, testloader, extra)
     return
 
 def main():
