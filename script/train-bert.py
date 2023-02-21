@@ -1,11 +1,9 @@
 import torch
-from torch.utils.data import TensorDataset, random_split
-from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, SubsetRandomSampler
-from torch.utils.data import TensorDataset, random_split
+from torch.utils.data import TensorDataset
+from torch.utils.data import DataLoader, SubsetRandomSampler
 from torch import nn
 from torch.nn import functional as F
-from transformers import BertForSequenceClassification, AdamW, BertConfig
-from transformers import get_linear_schedule_with_warmup
+from transformers import BertForSequenceClassification, AdamW
 from transformers import BertTokenizer
 from pytorch_pretrained_bert import BertModel
 import pandas as pd
@@ -14,7 +12,6 @@ import time, datetime, random, glob, os, sys, joblib, argparse, json
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, accuracy_score
 from sklearn.model_selection import KFold
 from sklearn import metrics
-from tqdm import tqdm
 
 USING_GPU = False
 DEVICE = None
@@ -53,6 +50,9 @@ def prepare_dataset(sentences, labels, tokenizer, max_length=100):
     labels = torch.tensor(labels)
     return input_ids, attention_masks, labels
 
+'''
+How to combine pytorch dataloader and k-fold
+'''
 def train(fold, model, device, train_loader, optimizer, epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
@@ -125,52 +125,6 @@ def train_bert_model(model, train_dataset, tokenizer, batch_size, epochs=2, lear
             test(fold, model, DEVICE, testloader)
     return
 
-def run_bert_model(model, test_dataset, batch_size, extras=False):    
-    print('Predicting labels for {:,} test sentences...'.format(len(test_dataset)))
-    
-    if USING_GPU:
-        print("Using GPU", DEVICE)
-        model.cuda(DEVICE)
-
-    model.eval()
-    predictions , true_labels = [], []
-    prediction_sampler = SequentialSampler(test_dataset)
-    prediction_dataloader = DataLoader(test_dataset, sampler=prediction_sampler, batch_size=batch_size)
-    for batch in tqdm(prediction_dataloader, total=len(test_dataset)):
-        
-        if extras:
-            with torch.no_grad():
-                b_proba = model(tokens=batch[0].to(DEVICE),
-                                  masks=batch[1].to(DEVICE), 
-                                  extras=batch[3].to(DEVICE))
-                
-                proba = b_proba.detach().cpu().numpy()
-                label_ids = batch[2].numpy()
-
-                predictions.append(proba)
-                true_labels.append(label_ids)
-                
-        else:
-            b_input_ids, b_input_mask, b_labels = batch
-            with torch.no_grad():
-                outputs = model(batch[0].to(DEVICE), token_type_ids=None,
-                                  attention_mask=batch[1].to(DEVICE))
-                b_proba = outputs[0]
-
-                proba = b_proba.detach().cpu().numpy()
-                label_ids = batch[2].numpy()
-
-                predictions.append(proba)
-                true_labels.append(label_ids)
-
-    print('    DONE.')
-   
-    flat_predictions = np.concatenate(predictions, axis=0)
-    return flat_predictions
-    #y_pred = np.argmax(flat_predictions, axis=1).flatten()
-    
-    #return y_pred
-    
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=int, default=0, choices=list(range(8)))
