@@ -72,11 +72,15 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
         if step % 40 == 0 and not step == 0:
             elapsed = format_time(time.time() - t0)
             print('  Batch {:>5,}  of  {:>5,}.    Elapsed: {:}.'.format(step, len(train_loader), elapsed))
-        print(batch)
         
         b_input_ids = batch[0].to(DEVICE)
         b_input_mask = batch[1].to(DEVICE)
-        b_labels = batch[2].to(DEVICE)S
+        b_labels = batch[2].to(DEVICE)
+        #print(b_labels)
+        # https://stackoverflow.com/questions/70548318/bertforsequenceclassification-target-size-torch-size1-16-must-be-the-same
+        b_labels = torch.nn.functional.one_hot(b_labels.to(torch.int64), 3)
+        #print(b_labels)
+        #print(b_labels.shape)
 
         loss, logits, hidden_states = model(b_input_ids,
                                             token_type_ids=None,
@@ -87,7 +91,7 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
         lossS.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
-        scheduler.step()S
+        scheduler.step()
 
         del loss, logits, hidden_states
 
