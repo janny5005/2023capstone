@@ -13,6 +13,7 @@ import time, datetime, random, glob, os, sys, joblib, argparse, json
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, accuracy_score
 from sklearn.model_selection import KFold
 from sklearn import metrics
+from tqdm import tqdm 
 
 USING_GPU = False
 DEVICE = None
@@ -55,7 +56,7 @@ def prepare_dataset(sentences, labels, tokenizer, max_length=100):
 '''
 How to combine pytorch dataloader and k-fold
 '''
-def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, epoch, extras):
+def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, epoch):
     print('Training...')
 
     # Measure how long the training epoch takes.
@@ -71,37 +72,24 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
         if step % 40 == 0 and not step == 0:
             elapsed = format_time(time.time() - t0)
             print('  Batch {:>5,}  of  {:>5,}.    Elapsed: {:}.'.format(step, len(train_loader), elapsed))
-
+        print(batch)
+        
         b_input_ids = batch[0].to(DEVICE)
         b_input_mask = batch[1].to(DEVICE)
-        b_labels = batch[2].to(DEVICE)
+        b_labels = batch[2].to(DEVICE)S
 
-        if extras:
-            b_extras = batch[3].to(DEVICE)
-            b_proba = model(tokens=b_input_ids,
-                            masks=b_input_mask,
-                            extras=b_extras)
+        loss, logits, hidden_states = model(b_input_ids,
+                                            token_type_ids=None,
+                                            attention_mask=b_input_mask,
+                                            labels=b_labels)
 
-            loss = loss_func(b_proba, b_labels)
-            total_train_loss += loss.item()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
+        total_train_loss += loss.item()
+        lossS.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        scheduler.step()S
 
-        else:
-            loss, logits, hidden_states = model(b_input_ids,
-                                                token_type_ids=None,
-                                                attention_mask=b_input_mask,
-                                                labels=b_labels)
-
-            total_train_loss += loss.item()
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
-
-            del loss, logits, hidden_states
+        del loss, logits, hidden_states
 
     avg_train_loss = total_train_loss / len(train_dataloader)
 
@@ -110,82 +98,72 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
     print("  Average training loss: {0:.2f}".format(avg_train_loss))
     print("  Training epoch took: {:}".format(training_time))
 
-def test(fold, model, device, test_loader, extra):
+def test(fold, model, device, test_loader, test_data_len, Y):
     print("Running Validation...")
 
     model.eval()
     predictions, true_labels = [], []
-    for batch in tqdm(test_loader, total=len(test_dataset)):
+    for batch in tqdm(test_loader, total=test_data_len):
 
-        if extras:
-            with torch.no_grad():
-                b_proba = model(tokens=batch[0].to(DEVICE),
-                                masks=batch[1].to(DEVICE),
-                                extras=batch[3].to(DEVICE))
 
-                proba = b_proba.detach().cpu().numpy()
-                label_ids = batch[2].numpy()
+        b_input_ids, b_input_mask, b_labels = batch
+        with torch.no_grad():
+            outputs = model(batch[0].to(DEVICE), token_type_ids=None,
+                            attention_mask=batch[1].to(DEVICE))
+            b_proba = outputs[0]
 
-                predictions.append(proba)
-                true_labels.append(label_ids)
+            proba = b_proba.detach().cpu().numpy()
+            label_ids = batch[2].numpy()
 
-        else:
-            b_input_ids, b_input_mask, b_labels = batch
-            with torch.no_grad():
-                outputs = model(batch[0].to(DEVICE), token_type_ids=None,
-                                attention_mask=batch[1].to(DEVICE))
-                b_proba = outputs[0]
-
-                proba = b_proba.detach().cpu().numpy()
-                label_ids = batch[2].numpy()
-
-                predictions.append(proba)
-                true_labels.append(label_ids)
+            predictions.append(proba)
+            true_labels.append(label_ids)
+    print(predictions)
+    print(true_labels)
 
 # batch size: 16, 32
 # learning rate: 5e-5, 3e-5, 2e-5
 # epochs: 2,3,4
-def train_bert_model(model, train_dataset, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, extras=False, save_fn=None):
+def train_bert_model(model, dataset, Y, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, save_fn=None):
 
     if USING_GPU:
         print("Using GPU", DEVICE)
         model.cuda(DEVICE)
 
-    optimizer = AdamW(model.parameters(),
-                      lr=learning_rate,
-                      eps=epsilon
-                      )
-
     # prepare cross validation
     n = 5
     kfold = KFold(n_splits=n, shuffle=True)
 # for each fold
-    for fold, (train_idx, test_idx) in enumerate(kfold.split(train_dataset)):
+    for fold, (train_idx, test_idx) in enumerate(kfold.split(dataset)):
         print('------------fold no---------{}----------------------'.format(fold))
         print(train_idx)
         print(test_idx)
-        train_tensor = Subset(train_dataset, train_idx)
-        test_tensor = Subset(train_dataset, test_idx)
+        train_tensor = Subset(dataset, train_idx)
+        test_tensor = Subset(dataset, test_idx)
+        test_data_len = len(test_idx)
         #train_subsampler = SubsetRandomSampler(train_idx)
         #test_subsampler = SubsetRandomSampler(test_idx)
 
         trainloader = DataLoader(
-            train_dataset,
+            dataset,
             batch_size=batch_size,
             sampler=RandomSampler(train_tensor))
         testloader = DataLoader(
-            train_dataset,
+            dataset,
             batch_size=batch_size,
             sampler=SequentialSampler(test_tensor))
         total_steps = len(trainloader) * epochs
+        optimizer = AdamW(model.parameters(),
+                          lr=learning_rate,
+                          eps=epsilon
+                          )
         scheduler = get_linear_schedule_with_warmup(optimizer,
                                                     num_warmup_steps=0,  # Default value in run_glue.py
                                                     num_training_steps=total_steps)
         loss_func = torch.nn.CrossEntropyLoss()
         for epoch_i in range(0, epochs):
             print('======== Epoch {:} / {:} ========'.format(epoch_i + 1, epochs))
-            train(fold, model, DEVICE, trainloader, optimizer, scheduler, loss_func, epochs, extras)
-            test(fold, model, DEVICE, testloader, extra)
+            train(fold, model, DEVICE, trainloader, optimizer, scheduler, loss_func, epochs)
+            #test(fold, model, DEVICE, testloader, test_data_len, Y)
     return
 
 def main():
@@ -245,7 +223,8 @@ def main():
     df = pd.read_csv(args.input)
     df = df[df['Text'].notna()]
     X = df.Text.values # x
-    #Y = df['label'] # y_true
+    Y = list(df['label']) # y_true
+    #print(Y)
     # RuntimeError: Error(s) in loading state_dict for BertForSequenceClassification:
     # size mismatch for classifier.weight: copying a param with shape torch.Size([3, 768]) from checkpoint, the shape in current model is torch.Size([2, 768]).
     # size mismatch for classifier.bias: copying a param with shape torch.Size([3]) from checkpoint, the shape in current model is torch.Size([2]).
@@ -260,7 +239,7 @@ def main():
     input_ids, attention_masks, labels = prepare_dataset(X, np.zeros(len(X)), tokenizer, max_length=400)
     dataset = TensorDataset(input_ids, attention_masks, labels)
     ## train_bert_model(model, train_dataset, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, extras=False, save_fn=None):
-    train_bert_model(model, dataset, batch_size=args.batchsize, extras=False)
+    train_bert_model(model, dataset, Y, batch_size=args.batchsize)
 
     #y_pred = np.zeros(len(X))
     #if not args.usegraph:
