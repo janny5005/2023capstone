@@ -88,14 +88,14 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
                                             labels=b_labels)
 
         total_train_loss += loss.item()
-        lossS.backward()
+        loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         scheduler.step()
 
         del loss, logits, hidden_states
 
-    avg_train_loss = total_train_loss / len(train_dataloader)
+    avg_train_loss = total_train_loss / len(train_loader)
 
     training_time = format_time(time.time() - t0)
     print("")
@@ -127,7 +127,7 @@ def test(fold, model, device, test_loader, test_data_len, Y):
 # batch size: 16, 32
 # learning rate: 5e-5, 3e-5, 2e-5
 # epochs: 2,3,4
-def train_bert_model(model, dataset, Y, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, save_fn=None):
+def train_bert_model(model, dataset, Y, batch_size, epochs=3, learning_rate=1e-5, epsilon=1e-8, save_fn=None):
 
     if USING_GPU:
         print("Using GPU", DEVICE)
