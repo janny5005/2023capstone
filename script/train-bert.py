@@ -60,7 +60,7 @@ def train(fold, model, device, train_loader, optimizer, scheduler, loss_func, ep
     print('Training...')
 
     # Measure how long the training epoch takes.
-    #t0 = time.time()
+    t0 = time.time()
 
     # Reset the total loss for this epoch.
     total_train_loss = 0
@@ -240,7 +240,7 @@ def main():
     used_bert_model = pretrained_models[args.trainedBertModel]
     model = BertForSequenceClassification.from_pretrained(used_bert_model, num_labels = 3)
     tokenizer = BertTokenizer.from_pretrained('bert-base-uncased', do_lower_case=True)
-    input_ids, attention_masks, labels = prepare_dataset(X, np.zeros(len(X)), tokenizer, max_length=400)
+    input_ids, attention_masks, labels = prepare_dataset(X, Y, tokenizer, max_length=400)
     dataset = TensorDataset(input_ids, attention_masks, labels)
     ## train_bert_model(model, train_dataset, batch_size, epochs=2, learning_rate=2e-5, epsilon=1e-8, extras=False, save_fn=None):
     train_bert_model(model, dataset, Y, batch_size=args.batchsize)
