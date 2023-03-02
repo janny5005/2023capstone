@@ -10,7 +10,7 @@ from pytorch_pretrained_bert import BertModel
 import pandas as pd
 import numpy as np
 import time, datetime, random, glob, os, sys, joblib, argparse, json
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, accuracy_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import KFold
 from sklearn import metrics
 from tqdm import tqdm 
