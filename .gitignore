@@ -25,3 +25,19 @@ Data/CLAWS/covidhate/tweet_all.csv
 script/data/all_labeled_text.csv
 script/bert-8-3-5/pytorch_model.bin
 script/data/part_labeled_tweet.csv
+Output/annotated_tweets_w_classification_2epochs.csv
+Output/annotated_tweets_w_classification_3epochs.csv
+Output/Saved_Models/2 epochs/bert/config.json
+Output/Saved_Models/2 epochs/bert/pytorch_model.bin
+Output/Saved_Models/2 epochs/none/config.json
+Output/Saved_Models/2 epochs/none/pytorch_model.bin
+Output/Saved_Models/2 epochs/roberta/config.json
+Output/Saved_Models/2 epochs/roberta/pytorch_model.bin
+Output/Saved_Models/2 epochs/training_stats_dict.pkl
+Output/Saved_Models/3 epochs/bert/config.json
+Output/Saved_Models/3 epochs/bert/pytorch_model.bin
+Output/Saved_Models/3 epochs/none/config.json
+Output/Saved_Models/3 epochs/none/pytorch_model.bin
+Output/Saved_Models/3 epochs/roberta/config.json
+Output/Saved_Models/3 epochs/roberta/pytorch_model.bin
+Output/Saved_Models/3 epochs/training_stats_dict.pkl
